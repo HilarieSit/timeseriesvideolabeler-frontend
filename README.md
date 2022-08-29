@@ -1,4 +1,8 @@
-# timeseriesseg
+# Time Series Video Labeler Frontend
+
+I built an app using Vue.js and Flask to make labeling video data for time series machine learning models easier.
+
+![timeseriesseg example](https://github.com/HilarieSit/timeseriesvideolabeler-frontend/blob/main/timeseriessegexample.gif)
 
 ## Project setup
 ```
