@@ -2,55 +2,43 @@
 <div>
   <div id="upload_area">
     <p>Upload a Video:</p>
-    <input type="file" @change="previewImage" accept="video/*" >
+    <input type="file" @change="previewVideo" accept="video/*" >
     <button class="btn btn-success" @click="onUpload">Upload</button>
-  </div>
-  <div id="upload_area">
-    <p>or Enter Video URL:</p>
-    <input id="url" type="text">
-    <button class="btn btn-success" @click="onSubmit">Submit</button>
   </div>
 </div>
 </template>
 
 <script>
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/storage'
+import axios from 'axios';
 
 export default {
   name: 'UploadVideo',
   data(){
 	return{
-      vidData: null,
       video: null,
-      uploadValue: 0
+      vidname: null
 	}
   },
   methods:{
-    previewImage(event) {
-      this.uploadValue=0;
-      this.video=null;
-      this.vidData = event.target.files[0];
+    previewVideo(event) {
+      this.video = event.target.files[0];
     },
     onUpload(){
-      this.video=null;
-      const storageRef=firebase.storage().ref(`${this.vidData.name}`).put(this.vidData);
-      storageRef.on(`state_changed`,snapshot=>{
-        this.uploadValue = (snapshot.bytesTransferred/snapshot.totalBytes)*100;
-      }, error=>{console.log(error.message)},
-      ()=>{this.uploadValue=100;
-        storageRef.snapshot.ref.getDownloadURL().then((url)=>{
-          this.video=url;
-          this.$emit('update', this.video)
-        });
-      }
-      );
+      var formData = new FormData();
+      formData.append("file", this.video);
+      axios.post('https://video-time-series-labeler.herokuapp.com/upload_file', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+      }).then(response => {
+          this.vidname = response.data.data.filename
+          this.frames = response.data.data.frames
+          this.$emit('update', [this.vidname, this.frames])
+        })
+        .catch(e => {
+          console.log(e, "error");
+        })
     },
-    onSubmit(){
-      this.video=document.getElementById('url').value;
-      this.$emit('update', this.video)
-    }
-
   }
 }
 </script>

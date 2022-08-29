@@ -1,45 +1,33 @@
 <template>
-  <div id="app">
+  <div id="app2">
     <h1> Video Labeling for Time Series Models</h1>
     <div >
       <UploadVideo @update="getVideo"/>
     </div>
     <div v-if="videoOptions.sources[0].src != 'none'">
-    <video-player :options="videoOptions" :sliderValue="slider2Vid" :key="vpkey" ref="player"/>
+    <video-player @update="getDuration" :options="videoOptions" :sliderValue="slider2Vid" :key="vpkey" ref="player"/>
     <div id="controls">
     <button class="btn btn-success" @click="addState()">Click to Add State</button>
     <div id="trimmer">
       <div class="veeno_slider">
         <veeno
-        v-model="sliderValue"
-        v-bind:handles="statepts"
-        connect
-        :tooltips="tooltips"
-        :range = "{ 
-          'min': 0, 
-          'max': 50 
-        }"
-        :step = 0.01
-        :key="componentKey"
-        @change="updateRanges"
-        @slide="updateValue"
+          v-model="sliderValue"
+          v-bind:handles="statepts"
+          connect
+          :tooltips="tooltips"
+          v-bind:range = "{ 
+            'min': 0, 
+            'max': duration
+          }"
+          :step = 0.01
+          :key="componentKey"
+          @change="updateRanges"
+          @slide="updateValue"
       /></div>
     </div>
     <div id="content">
-      <div class="table-responsive">
-        <!-- <EditableTable v-model="states" :fields="fields"/> -->
-        <b-table class="b-table table-dark table-striped table-bordered" :items="states" :fields="fields" fixed>
-            <template v-for="(field, index) in fields" #[`cell(${field.key})`]="data">
-                <b-form-input v-if="field.type && states[data.index].isEdit" :key="index" :type="field.type" :value="states[data.index][field.key]" @blur="(e) => inputHandler(e.target.value, data.index, field.key)"></b-form-input>
-                <div :key="index" v-if="field.type === 'edit'">
-                    <b-button class="delete-button" variant="danger" @click="deleteState(data.index)">Remove</b-button>
-                </div>
-                <span :key="index" v-else>{{data.value}}</span>
-            </template>
-        </b-table>
-      </div>
+      <EditableTable v-bind:states="states" @deleteState="deleteState" @editState="editState"/>
     </div>
-    <button class="btn btn-success" @click="download()">Click to Download</button>
   </div>
   </div>
   </div>
@@ -49,6 +37,8 @@
 import VideoPlayer from '@/components/VideoPlayer.vue';
 import veeno from 'veeno';
 import UploadVideo from '@/components/UploadVideo.vue'
+import EditableTable from '@/components/EditableTable.vue'
+import axios from 'axios';
 import 'nouislider/distribute/nouislider.min.css';
 
 export default {
@@ -56,7 +46,8 @@ export default {
   components: {
     VideoPlayer,
     veeno,
-    UploadVideo
+    UploadVideo,
+    EditableTable
   },
   computed:{
     tooltips(){
@@ -70,7 +61,7 @@ export default {
     states(){
       var states = [];
       for (var i = 0; i < this.statenames.length; i++){
-        states.push({'id': i, 'name': this.statenames[i], 'start': this.timeFormat(this.statepts[i]), 'end': this.timeFormat(this.statepts[i+1])})
+        states.push({'id': i, 'name': this.statenames[i], 'start': this.timeFormat(this.statepts[i]), 'end': this.timeFormat(this.statepts[i+1]), 'frames': this.frameRange(this.statepts[i], this.statepts[i+1])})
       }
       return states
     }
@@ -80,8 +71,13 @@ export default {
   },
   updated(){
     var bars = document.getElementsByClassName('noUi-connect');
-    for (var i = 0; i < bars.length; i++){
-      bars[i].style.background = this.colors[i]
+    var uniqueStates = [... new Set(this.statenames)]
+    for (var i = 0; i < uniqueStates.length; i++){
+      this.colordict[uniqueStates[i]] = this.colors[i]
+    }
+    for (var j = 0; j < bars.length; j++){
+      var key = this.statenames[j]
+      bars[j].style.background = this.colordict[key]
     }
   },
   data() {
@@ -95,9 +91,10 @@ export default {
                 'none',
                 type: 'video/mp4'
             }
-          ],
-          techOrder: ["youtube"]
+          ]
       },
+      frames: 0,
+      duration: 1,
       slider2Vid: null,
       sliderValue: null,
       statepts: [0, 50],
@@ -105,56 +102,32 @@ export default {
       componentKey: 0,
       vpkey: 0,
       colors: ['#FFB7B2', '#E2F0CB', '#B5EAD7','#B5DAE7', '#C7CEEA'],
-      fields: [
-        {
-          key: "start",
-          label: "Start Time",
-          type: "text",
-          editable: false,
-          placeholder: "Enter lower bound...",
-          class: "lb-col",
-        },
-        {
-          key: "end",
-          label: "End Time",
-          type: "text",
-          editable: false,
-          placeholder: "Enter upper bound...",
-          class: "ub-col",
-        },
-        {
-          key: "name",
-          label: "Label",
-          type: "text",
-          editable: true,
-          placeholder: "Enter state name...",
-          class: "name-col",
-        },
-        { 
-          key: "edit", 
-          label: "",
-          type: "edit", 
-          class: "del-col",}
-      ]
+      colordict: {},
+      currentState: 0
     };
   },
   methods: {
     timeFormat(n){
-      return Math.floor(n/60)+':'+Math.floor(n%60).toLocaleString('en-US', {minimumIntegerDigits: 2, useGrouping: false})+':'+Math.floor((n - Math.floor(n))*60).toLocaleString('en-US', {minimumIntegerDigits: 2, useGrouping: false})
+      return Math.floor(n/60)+':'+Math.floor(n%60).toLocaleString('en-US', {minimumIntegerDigits: 2, useGrouping: false})+':'+Math.floor((n - Math.floor(n))*1000).toLocaleString('en-US', {minimumIntegerDigits: 3, useGrouping: false})
+    },
+    frameRange(n1, n2){
+      return (Math.round((n1/this.duration) * this.frames)).toString() + ' - ' +(Math.round((n2/this.duration) * this.frames)).toString()
     },
     addState(){
       this.slider2Vid = (this.$refs.player.$data.player.currentTime()).toString()
       this.statepts.push(this.slider2Vid);
       this.statepts.sort((a,b)=>a-b);
-      this.statenames.push('State '+(this.componentKey+1).toString());
+      this.statenames.push('State '+(this.currentState+1).toString());
       this.componentKey += 1;
+      this.currentState += 1;
     },
     deleteState(index) {
       this.statepts = this.statepts.filter((item, i) => i !== index);
       this.statenames = this.statenames.filter((item, i) => i !== index);
-      console.log(this.statepts)
-      console.log(this.states)
-      this.$emit('input', this.statepts);
+      this.componentKey += 1;
+    },
+    editState(options) {
+      this.statenames[options.id] = options.value;
       this.componentKey += 1;
     },
     updateRanges(event){
@@ -166,9 +139,24 @@ export default {
     updateValue(){
       this.slider2Vid = this.sliderValue
     },
-    getVideo(vidURL){
-      this.videoOptions.sources[0].src = vidURL
-      this.vpkey += 1
+    async getVideo(vidinfo){
+      this.frames = vidinfo[1]
+        await axios({
+          url: 'https://video-time-series-labeler.herokuapp.com/download/'+vidinfo[0], 
+          method: 'GET',
+          responseType: 'blob',
+        }).then((response) => {
+          this.statepts = this.statepts.slice(0,2)
+          this.statenames = this.statenames.slice(0,1)
+          var FILE = window.URL.createObjectURL(new Blob([response.data]));
+          this.videoOptions.sources[0].src = FILE
+          this.vpkey += 1
+        });
+    },
+    getDuration(duration){
+      this.duration = duration;
+      this.statepts = [0, duration]
+      this.componentKey += 1;
     }
   }
 };
@@ -181,7 +169,7 @@ export default {
     width: 100px !important;
   }
   .lb-col, .ub-col{
-    width: 200px !important;
+    width: 150px !important;
   }
 
   .noUi-horizontal .noUi-handle{
@@ -195,7 +183,6 @@ export default {
 
   #settings, #controls{
     padding: 10px;
-    /* background: radial-gradient(#333, hsl(200,30%,6%) ); */
     margin-bottom: 20px;
     margin-top: 5px;
     border-radius: 20px;
@@ -214,25 +201,13 @@ export default {
     color: #fff;
     text-align: left;
   }
-  
-  /* Show the controls (hidden at the start by default) */
-  .video-js .vjs-control-bar { 
-    display: -webkit-box;
-    display: -webkit-flex;
-    display: -ms-flexbox;
-    display: flex;
-  }
-
-  .vjs-big-play-button{
-    display: none !important;
-  }
 
   .vjs-control-bar {
-    font-size: 175%
+    font-size: 150%
   }
 
   .video-js .vjs-time-control {
-    display: block;
+    display: inline;
   }
   .video-js .vjs-remaining-time {
     display: none;
@@ -242,9 +217,9 @@ export default {
     background-color: black !important;
   }
   /* Make the demo a little prettier */
-  #app {
+  #app2 {
     text-align: center; 
-    margin: 50px auto;
+    margin: 30px auto 50px;
     max-width: 1000px;
     width: 100%;
   }
@@ -300,7 +275,7 @@ td, tr {
 }
 
 .name-col{
-  width: 250px;
+  width: 200px;
 }
 
 .lb-col, .ub-col {
